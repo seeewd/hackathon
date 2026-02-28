@@ -13,6 +13,7 @@
 
 ## 구현 파일
 - GhPython 실행 스크립트: `scripts/ghpython_gemini_node_builder.py`
+- Rhino/Eto 챗봇 창 스크립트: `scripts/rhino_gh_chatbot_window.py`
 - Gemini 시스템 프롬프트: `specs/gemini_system_prompt.md`
 - 타입 매핑(초안): `specs/component_mapping.json`
 - Gemini 응답 예시: `examples/gemini_response_example.md`
@@ -25,6 +26,12 @@
 3. Gemini API 키 입력
 4. 설치 완료 경로 확인:
    - `~/Library/Application Support/McNeel/Rhinoceros/8.0/scripts/archicad-gemini-node-builder`
+
+## 챗봇 창 모드 (권장)
+1. Rhino에서 ScriptEditor 열기
+2. `rhino_gh_chatbot_window.py` 실행
+3. 챗봇 창에 프롬프트 입력 후 `Generate Nodes` 클릭
+4. Gemini 응답 코드가 자동 파싱되어 Grasshopper 노드/와이어 생성
 
 ## 작업 Task (Gemini 중심)
 
