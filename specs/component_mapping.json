@@ -1,0 +1,21 @@
+{
+  "Curve": {
+    "search": [["params", "geometry", "curve"], ["curve", "param"]]
+  },
+  "Line": {
+    "search": [["curve", "line"], ["line", "sdl"]]
+  },
+  "Point": {
+    "search": [["vector", "point"], ["params", "geometry", "point"]]
+  },
+  "Archicad.Wall": {
+    "search": [["archicad", "wall"]]
+  },
+  "Archicad.Slab": {
+    "search": [["archicad", "slab"]]
+  },
+  "Archicad.Column": {
+    "search": [["archicad", "column"]]
+  }
+}
+
