@@ -28,7 +28,7 @@ import Grasshopper.Kernel as GHK
 from Grasshopper import Instances
 
 
-DEFAULT_MODEL = "gemini-1.5-flash"
+DEFAULT_MODEL = "gemini-3-flash-preview"
 DEFAULT_API_KEY = ""
 DEFAULT_SYSTEM_PROMPT = (
     "You generate Grasshopper node-building code for Rhino/Grasshopper.\n"
@@ -46,8 +46,21 @@ DEFAULT_MAPPING = {
     "Archicad.Column": {"search": [["archicad", "column"]]},
 }
 
+TYPE_ALIASES = {
+    "CenterBox": [["box", "center"], ["center", "box"], ["box"]],
+    "DeconstructBrep": [["deconstruct", "brep"]],
+    "FaceNormals": [["face", "normal"], ["surface", "normal"], ["normal"]],
+    "PlaneNormal": [["plane", "normal"]],
+    "ListItem": [["list", "item"]],
+    "NumberSlider": [["number", "slider"]],
+    "Number": [["number"]],
+    "Series": [["series"]],
+    "Polygon": [["polygon"]],
+}
+
 ALLOWED_CALLS = set(["node", "wire"])
 CODE_BLOCK_RE = re.compile(r"```([a-zA-Z0-9_+-]*)\s*([\s\S]*?)```", re.IGNORECASE)
+CAMEL_SPLIT_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)|\d+")
 FORM_KEY = "gh_gemini_chat_window"
 NODES_KEY = "gh_gemini_chat_nodes"
 
@@ -100,6 +113,10 @@ def _load_mapping_from_file():
 def _is_literal_node(node):
     if isinstance(node, ast.Constant):
         return True
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        return isinstance(node.operand, ast.Constant) and isinstance(
+            node.operand.value, (int, float)
+        )
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return all(_is_literal_node(x) for x in node.elts)
     if isinstance(node, ast.Dict):
@@ -198,6 +215,30 @@ def _gemini_generate(prompt_text, api_key_text, model_name, system_prompt_text):
     return "".join([p.get("text", "") for p in parts]).strip()
 
 
+def _http_error_detail(http_ex):
+    try:
+        raw = http_ex.read().decode("utf-8")
+        if not raw:
+            return ""
+        try:
+            obj = json.loads(raw)
+            err = obj.get("error", {})
+            msg = err.get("message") or raw
+            status = err.get("status")
+            code = err.get("code")
+            parts = []
+            if code is not None:
+                parts.append("code=%s" % code)
+            if status:
+                parts.append("status=%s" % status)
+            parts.append("message=%s" % msg)
+            return ", ".join(parts)
+        except Exception:
+            return raw
+    except Exception:
+        return ""
+
+
 def _proxy_text(proxy):
     desc = getattr(proxy, "Desc", None)
     if desc is None:
@@ -227,12 +268,43 @@ def _find_proxy_by_tokens(token_groups):
     return None
 
 
+def _tokenize_type_name(type_name):
+    name = _safe_text(type_name).replace(".", " ").replace("_", " ").replace("-", " ")
+    tokens = []
+    for part in name.split():
+        for tok in CAMEL_SPLIT_RE.findall(part):
+            tok = tok.strip().lower()
+            if tok:
+                tokens.append(tok)
+    return tokens
+
+
+def _resolve_search_groups(type_name, mapping):
+    cfg = mapping.get(type_name, {})
+    search_groups = cfg.get("search")
+    if search_groups:
+        return search_groups
+
+    alias_groups = TYPE_ALIASES.get(type_name)
+    if alias_groups:
+        return alias_groups
+
+    tokens = _tokenize_type_name(type_name)
+    if tokens:
+        # 1st: all tokens exact, 2nd: drop very short tokens fallback
+        compact = [t for t in tokens if len(t) > 1]
+        if compact and compact != tokens:
+            return [tokens, compact]
+        return [tokens]
+    return [[type_name]]
+
+
 def _emit_object(type_name, mapping):
     cfg = mapping.get(type_name, {})
     guid_text = cfg.get("guid")
     if guid_text:
         return Instances.ComponentServer.EmitObject(System.Guid(guid_text))
-    search_groups = cfg.get("search", [[type_name]])
+    search_groups = _resolve_search_groups(type_name, mapping)
     proxy = _find_proxy_by_tokens(search_groups)
     if proxy is None:
         return None
@@ -432,7 +504,10 @@ class GhGeminiChatForm(forms.Form):
         except urllib.error.HTTPError as http_ex:
             self.status_label.Text = "HTTP Error: %s" % http_ex
             self._append_log("HTTP Error: %s" % http_ex)
-            self._append_log("Tip: try model 'gemini-1.5-flash' or list available models.")
+            detail = _http_error_detail(http_ex)
+            if detail:
+                self._append_log("API detail: %s" % detail)
+            self._append_log("Tip: check API key and model name, then retry.")
         except Exception as ex:
             self.status_label.Text = "Error: %s" % ex
             self._append_log("Error: %s" % ex)

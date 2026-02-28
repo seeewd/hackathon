@@ -32,7 +32,7 @@ import Grasshopper.Kernel as GHK
 from Grasshopper import Instances
 
 
-DEFAULT_MODEL = "gemini-1.5-pro"
+DEFAULT_MODEL = "gemini-3-flash-preview"
 DEFAULT_API_KEY = ""
 DEFAULT_SYSTEM_PROMPT = (
     "You generate Grasshopper node-building code for Rhino/Grasshopper.\n"
@@ -50,8 +50,21 @@ DEFAULT_MAPPING = {
     "Archicad.Column": {"search": [["archicad", "column"]]},
 }
 
+TYPE_ALIASES = {
+    "CenterBox": [["box", "center"], ["center", "box"], ["box"]],
+    "DeconstructBrep": [["deconstruct", "brep"]],
+    "FaceNormals": [["face", "normal"], ["surface", "normal"], ["normal"]],
+    "PlaneNormal": [["plane", "normal"]],
+    "ListItem": [["list", "item"]],
+    "NumberSlider": [["number", "slider"]],
+    "Number": [["number"]],
+    "Series": [["series"]],
+    "Polygon": [["polygon"]],
+}
+
 ALLOWED_CALLS = set(["node", "wire"])
 CODE_BLOCK_RE = re.compile(r"```([a-zA-Z0-9_+-]*)\s*([\s\S]*?)```", re.IGNORECASE)
+CAMEL_SPLIT_RE = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?=[A-Z]|$)|\d+")
 
 
 def _safe_text(v):
@@ -99,6 +112,10 @@ def _is_literal_node(node):
     )
     if isinstance(node, ast.Constant):
         return True
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        return isinstance(node.operand, ast.Constant) and isinstance(
+            node.operand.value, (int, float)
+        )
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return all(_is_literal_node(x) for x in node.elts)
     if isinstance(node, ast.Dict):
@@ -230,13 +247,43 @@ def _find_proxy_by_tokens(token_groups):
     return None
 
 
+def _tokenize_type_name(type_name):
+    name = _safe_text(type_name).replace(".", " ").replace("_", " ").replace("-", " ")
+    tokens = []
+    for part in name.split():
+        for tok in CAMEL_SPLIT_RE.findall(part):
+            tok = tok.strip().lower()
+            if tok:
+                tokens.append(tok)
+    return tokens
+
+
+def _resolve_search_groups(type_name, mapping):
+    cfg = mapping.get(type_name, {})
+    search_groups = cfg.get("search")
+    if search_groups:
+        return search_groups
+
+    alias_groups = TYPE_ALIASES.get(type_name)
+    if alias_groups:
+        return alias_groups
+
+    tokens = _tokenize_type_name(type_name)
+    if tokens:
+        compact = [t for t in tokens if len(t) > 1]
+        if compact and compact != tokens:
+            return [tokens, compact]
+        return [tokens]
+    return [[type_name]]
+
+
 def _emit_object(type_name, mapping):
     cfg = mapping.get(type_name, {})
     guid_text = cfg.get("guid")
     if guid_text:
         return Instances.ComponentServer.EmitObject(System.Guid(guid_text))
 
-    search_groups = cfg.get("search", [[type_name]])
+    search_groups = _resolve_search_groups(type_name, mapping)
     proxy = _find_proxy_by_tokens(search_groups)
     if proxy is None:
         return None

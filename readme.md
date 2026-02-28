@@ -1,83 +1,168 @@
-# Archicad x Rhino-Grasshopper Gemini Node Builder (macOS)
+# GH Gemini Node Builder — 자연어로 Grasshopper 노드를 자동 생성
 
-## 목표
-- Archicad 연결이 된 Grasshopper에서 자연어 요청을 Gemini에 보내고, Gemini가 만든 코드를 자동 추출해 노드/와이어를 생성
+> **해커톤 제출작** | Rhino 8 + Grasshopper + Archicad + Google Gemini
 
-## 원하는 자동화 흐름
-1. 사용자 입력: `"~~한 벽 만드는 노드 만들어줘"`
-2. GhPython이 Gemini API 호출
-3. Gemini 응답에서 `python code block` 자동 추출
-4. 코드 DSL 검증(`node(...)`, `wire(...)`만 허용)
-5. Grasshopper 캔버스에 노드 생성 + 와이어 연결
-6. Archicad 컴포넌트로 전달
+---
 
-## 구현 파일
-- GhPython 실행 스크립트: `scripts/ghpython_gemini_node_builder.py`
-- Rhino/Eto 챗봇 창 스크립트: `scripts/rhino_gh_chatbot_window.py`
-- Gemini 시스템 프롬프트: `specs/gemini_system_prompt.md`
-- 타입 매핑(초안): `specs/component_mapping.json`
-- Gemini 응답 예시: `examples/gemini_response_example.md`
-- mac 설치파일: `install_mac.command`
-- 배포용 zip: `dist/ArchiGhGemini_mac_installer.zip`
+## 프로젝트 한 줄 요약
 
-## mac 설치 (API 키 주입)
-1. 터미널에서 프로젝트 폴더로 이동
-2. `./install_mac.command` 실행
+한국어 자연어 프롬프트를 입력하면, Gemini AI가 Grasshopper 노드 배치 코드를 생성하고, 이를 즉시 실행해 Grasshopper 캔버스에 노드와 와이어를 자동으로 생성하는 도구입니다.
+
+---
+
+## 문제 의식
+
+Grasshopper는 건축·제품 설계에 강력한 파라메트릭 모델링 환경이지만, **노드를 하나씩 찾아 연결하는 과정은 전문가에게도 반복적이고 진입 장벽이 높습니다.** 특히 Archicad 연동 컴포넌트는 적절한 포트 연결 방법을 모르면 사용하기 어렵습니다.
+
+이 프로젝트는 "**자연어 한 문장 → 노드 그래프 자동 완성**"을 목표로, 비전문가도 Grasshopper를 사용할 수 있도록 AI가 노드 배치를 대신해 줍니다.
+
+---
+
+## 핵심 기능
+
+| 기능 | 설명 |
+|------|------|
+| 자연어 → 노드 생성 | 한국어/영어 프롬프트 → Gemini → Grasshopper 노드 자동 배치 |
+| DSL 코드 추출 | Gemini 응답에서 `node()` / `wire()` 코드블록만 안전하게 추출 |
+| AST 기반 보안 검증 | 허용된 함수 호출만 실행, 임의 코드 주입 차단 |
+| 실행 실패 시 롤백 | 노드 생성 중 오류 발생 시 생성된 객체 전체 자동 제거 |
+| 챗봇 UI | Rhino 내 Eto 기반 챗봇 창으로 대화형 사용 가능 |
+| GhPython 컴포넌트 | Grasshopper 캔버스 안에서 직접 실행하는 컴포넌트 모드 |
+| Archicad 호환 | Wall, Slab, Column 등 Archicad 컴포넌트 자동 탐색 및 배치 |
+
+---
+
+## 동작 흐름
+
+```
+사용자 입력 (자연어)
+        ↓
+Gemini API 호출 (systemInstruction + user prompt)
+        ↓
+응답 텍스트에서 python 코드블록 추출
+        ↓
+AST 검증 (node / wire 호출만 허용)
+        ↓
+샌드박스 exec() 실행
+        ↓
+Grasshopper 캔버스에 노드 + 와이어 생성
+        ↓
+Archicad로 데이터 전달 (선택)
+```
+
+---
+
+## 사용 방법
+
+### A. 챗봇 창 모드 (권장)
+
+1. Rhino 8에서 ScriptEditor 열기
+2. `scripts/rhino_gh_chatbot_window.py` 실행
 3. Gemini API 키 입력
-4. 설치 완료 경로 확인:
-   - `~/Library/Application Support/McNeel/Rhinoceros/8.0/scripts/archicad-gemini-node-builder`
+4. 프롬프트 입력 예시:
+   - `"정육면체 하나와 그 네 면에 올라가는 오각형 지붕을 만들어줘"`
+   - `"Curve를 Archicad Wall에 연결하는 노드를 만들어줘"`
+5. `Generate Nodes` 클릭 → Grasshopper 캔버스에 자동 생성
 
-## 챗봇 창 모드 (권장)
-1. Rhino에서 ScriptEditor 열기
-2. `rhino_gh_chatbot_window.py` 실행
-3. 챗봇 창에 프롬프트 입력 후 `Generate Nodes` 클릭
-4. Gemini 응답 코드가 자동 파싱되어 Grasshopper 노드/와이어 생성
+### B. GhPython 컴포넌트 모드
 
-## 작업 Task (Gemini 중심)
+1. Grasshopper에서 `GhPython` 컴포넌트 추가
+2. `scripts/ghpython_gemini_node_builder.py` 코드 붙여넣기
+3. 입력 포트 9개 연결:
 
-### 1) DSL 계약 고정
-- [x] Gemini 출력 포맷 고정 (`python fenced code block`)
-- [x] 허용 함수 고정 (`node`, `wire`)
-- [x] 타입 매핑 초안 작성 (`Archicad.Wall` 등)
-- 완료 조건: Gemini 응답이 그대로 실행 가능한 DSL 코드
+| 포트 | 타입 | 설명 |
+|------|------|------|
+| `run` | bool | True로 설정하면 실행 |
+| `prompt` | str | 자연어 프롬프트 |
+| `use_api` | bool | True: Gemini API 호출, False: 직접 응답 입력 |
+| `gemini_response` | str | use_api=False일 때 Gemini 응답 원문 |
+| `api_key` | str | Gemini API 키 |
+| `model` | str | 모델명 (기본: gemini-2.5-flash-preview) |
+| `system_prompt` | str | 시스템 프롬프트 (기본값 내장) |
+| `mapping_json` | str | 컴포넌트 타입 매핑 JSON |
+| `clear_previous` | bool | 이전 생성 노드 초기화 여부 |
 
-### 2) Gemini 연동
-- [x] GhPython에서 Gemini API 직접 호출 옵션 구현
-- [x] API 호출 없이 `gemini_response` 텍스트만으로 실행하는 옵션 구현
-- [ ] 실패 재시도/백오프 추가
-- 완료 조건: `use_api=True` 또는 `False` 모두 동작
+---
 
-### 3) 코드 추출/검증/실행
-- [x] 코드 블록 추출기 구현
-- [x] AST 기반 DSL 검증 구현
-- [x] 실행 실패 시 롤백 처리 구현
-- [x] 장문 응답에서도 유효한 DSL 코드블록 자동 선택
-- 완료 조건: 위험 코드 없이 노드 생성만 수행
+## 설치 (macOS)
 
-### 4) Archicad 호환 보정
-- [ ] Archicad 컴포넌트별 정확한 포트 인덱스 검증
-- [ ] 프로젝트 환경에서 `component_mapping.json` 토큰 보정
-- 완료 조건: Curve -> Archicad.Wall 케이스 안정화
+```bash
+# 프로젝트 폴더에서
+./install_mac.command
+# → Gemini API 키 입력
+# → ~/Library/Application Support/McNeel/Rhinoceros/8.0/scripts/ 에 설치
+```
 
-## 빠른 실행 방법 (GhPython)
-1. Grasshopper에서 `GhPython` 컴포넌트를 놓고 `scripts/ghpython_gemini_node_builder.py` 코드 붙여넣기
-2. 입력 포트 9개 생성:
-   - `run`, `prompt`, `use_api`, `gemini_response`, `api_key`, `model`, `system_prompt`, `mapping_json`, `clear_previous`
-3. 기본 연결:
-   - `system_prompt` <- `specs/gemini_system_prompt.md`의 코드블록 내용
-   - `mapping_json` <- `specs/component_mapping.json` 내용
-4. 실행 방식 A(권장): `use_api=True`, `prompt` 입력, `api_key` 입력 후 `run=True`
-5. 실행 방식 B(디버그): `use_api=False`, `gemini_response`에 Gemini 원문 붙여넣고 `run=True`
-   - 코드만 따로 뽑을 필요 없음. 원문 전체를 넣으면 자동 파싱됨.
+또는 `dist/ArchiGhGemini_mac_installer.zip`을 사용하세요.
 
-## Gemini 응답 형식 예시
+---
+
+## Gemini DSL 예시
+
+Gemini가 아래와 같은 코드를 반환하면, 스크립트가 자동으로 추출하여 실행합니다:
+
 ```python
 node("curve_src", "Curve", 120, 120, nickname="source_curve")
 node("ac_wall", "Archicad.Wall", 360, 120, nickname="wall")
 wire("curve_src", 0, "ac_wall", 0)
 ```
 
+### 허용된 DSL API
+
+```
+node(id, type_name, x, y, nickname=None)  # 노드 생성 및 배치
+wire(from_id, out_index, to_id, in_index)  # 노드 간 와이어 연결
+```
+
+### 지원 컴포넌트 타입
+
+- `Curve`, `Line`, `Point` (Grasshopper 기본)
+- `Archicad.Wall`, `Archicad.Slab`, `Archicad.Column` (Archicad 연동)
+- `component_mapping.json`을 수정해 커스텀 타입 추가 가능
+
+---
+
+## 보안 설계
+
+- **AST 파싱 검증**: `node()` / `wire()` 이외의 함수 호출, 변수 선언, 루프, import 등 모두 거부
+- **리터럴 인수만 허용**: 동적 표현식 실행 불가
+- **샌드박스 실행**: `__builtins__={}`로 격리된 환경에서 exec
+- **롤백 처리**: 실행 실패 시 생성된 모든 노드 자동 삭제
+
+---
+
+## 파일 구조
+
+```
+hackathon/
+├── scripts/
+│   ├── rhino_gh_chatbot_window.py     # Rhino 챗봇 창 (Eto UI)
+│   └── ghpython_gemini_node_builder.py # GhPython 컴포넌트 스크립트
+├── specs/
+│   ├── gemini_system_prompt.md        # Gemini 시스템 프롬프트
+│   └── component_mapping.json         # 컴포넌트 타입 매핑
+├── examples/
+│   └── gemini_response_example.md     # Gemini 응답 예시
+├── dist/
+│   └── ArchiGhGemini_mac_installer.zip
+└── install_mac.command                 # macOS 설치 스크립트
+```
+
+---
+
+## 기술 스택
+
+- **런타임**: Rhino 8 (CPython 3.11, macOS)
+- **UI**: Eto.Forms (Rhino 내장 크로스플랫폼 UI)
+- **AI**: Google Gemini API (`gemini-2.5-flash-preview`)
+- **CAD**: Rhino/Grasshopper, Archicad (Live Connection)
+- **언어**: Python (표준 라이브러리만 사용, 외부 의존성 없음)
+
+---
+
 ## 주의사항
-- 현재 DSL은 의도적으로 제한되어 있음(`node`, `wire`만 허용)
-- `component_mapping.json`의 Archicad 검색 토큰은 사용 환경에 맞게 조정 필요
-- Rhino/Grasshopper 환경에서만 실제 실행 가능(이 저장소에서는 런타임 테스트 불가)
+
+- Rhino 8 + Grasshopper 환경에서만 실행 가능
+- Gemini API 키 필요 (Google AI Studio에서 발급)
+- Archicad 컴포넌트는 Archicad-Grasshopper Live Connection 플러그인 필요
+- `component_mapping.json`의 검색 토큰은 사용 환경에 맞게 조정 필요
